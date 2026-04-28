@@ -1,0 +1,13 @@
+# Python Cache
+__pycache__/
+*.pyc
+
+# Icarus Verilog & Cocotb Build Artifacts
+sim_build/
+*.vvp
+*.vcd
+*.fst
+results.xml
+
+# OS generated files
+.DS_Store
