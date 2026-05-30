@@ -643,11 +643,20 @@ def module_sau(rd2_data_i, adrs_1_i, adrs_0_i, funct3_i):
     return aligned_data_o, byte_mask_o
 
 """ALU"""
-
-def module_alu(src1_i, src2_i, alu_op_i):
+def module_alu(src1_i, src2_i, alu_op_i, DEBUG_MODE=False):
     """
     Arithmetic Logic Unit (ALU) - Full RV32I Base Integer Support
     """
+    # Map the incoming integer from the Controller/Cocotb to the internal string logic
+    ALU_OPS = {
+        0: "ADD", 1: "SUB", 2: "SLL", 3: "SLT", 
+        4: "SLTU", 5: "XOR", 6: "SRL", 7: "SRA", 
+        8: "OR", 9: "AND"
+    }
+    
+    # Safely grab the string, default to pass-through if invalid
+    op_string = ALU_OPS.get(alu_op_i, "PASS")
+
     # 1. Unsigned 32-bit wire boundaries
     a_i = src1_i & 0xFFFFFFFF
     b_i = src2_i & 0xFFFFFFFF
@@ -661,46 +670,54 @@ def module_alu(src1_i, src2_i, alu_op_i):
     ovfl_o = 0
 
     # 3. The ALU Core Execution (The Big Multiplexer)
-    if alu_op_i == "ADD":
+    if op_string == "ADD":
         res_o = a_i + b_i
         carry_o = 1 if res_o > 0xFFFFFFFF else 0
-        ovfl_o = 1 if (a_s > 0 and b_s > 0 and (a_s + b_s) <= 0) or \
-                      (a_s < 0 and b_s < 0 and (a_s + b_s) >= 0) else 0
 
-    elif alu_op_i == "SUB":
+        # Mask to 32 bits, then convert to signed to check hardware wrap-around
+        res_signed = res_o & 0xFFFFFFFF
+        res_signed = res_signed if res_signed < 0x80000000 else res_signed - 0x100000000
+        # Evaluate overflow against the physically truncated result
+        ovfl_o = 1 if (a_s > 0 and b_s > 0 and res_signed < 0) or \
+                      (a_s < 0 and b_s < 0 and res_signed >= 0) else 0
+    elif op_string == "SUB":
         res_o = a_i - b_i
         carry_o = 1 if a_i >= b_i else 0 # Unsigned borrow
-        ovfl_o = 1 if (a_s > 0 and b_s < 0 and (a_s - b_s) <= 0) or \
-                      (a_s < 0 and b_s > 0 and (a_s - b_s) >= 0) else 0
+        # Mask to 32 bits, then convert to signed to check hardware wrap-around
+        res_signed = res_o & 0xFFFFFFFF
+        res_signed = res_signed if res_signed < 0x80000000 else res_signed - 0x100000000
+        # Evaluate overflow against the physically truncated result
+        ovfl_o = 1 if (a_s >= 0 and b_s < 0 and res_signed < 0) or \
+                      (a_s < 0 and b_s > 0 and res_signed >= 0) else 0
 
     # Bitwise Operations
-    elif alu_op_i == "AND":
+    elif op_string == "AND":
         res_o = a_i & b_i
-    elif alu_op_i == "OR":
+    elif op_string == "OR":
         res_o = a_i | b_i
-    elif alu_op_i == "XOR":
+    elif op_string == "XOR":
         res_o = a_i ^ b_i
 
     # Shift Operations (RISC-V only looks at the bottom 5 bits of the shift amount)
-    elif alu_op_i == "SLL":  # Shift Left Logical
+    elif op_string == "SLL":  # Shift Left Logical
         shift_amt = b_i & 0x1F
         res_o = a_i << shift_amt
 
-    elif alu_op_i == "SRL":  # Shift Right Logical (Fills with 0s)
+    elif op_string == "SRL":  # Shift Right Logical (Fills with 0s)
         shift_amt = b_i & 0x1F
         res_o = a_i >> shift_amt
 
-    elif alu_op_i == "SRA":  # Shift Right Arithmetic (Preserves Sign Bit)
+    elif op_string == "SRA":  # Shift Right Arithmetic (Preserves Sign Bit)
         shift_amt = b_i & 0x1F
         # We use the signed version (a_s) here because Python natively
         # sign-extends negative integers when using >>
         res_o = a_s >> shift_amt
 
     # Comparison Operations
-    elif alu_op_i == "SLT":  # Set Less Than (Signed)
+    elif op_string == "SLT":  # Set Less Than (Signed)
         res_o = 1 if a_s < b_s else 0
 
-    elif alu_op_i == "SLTU": # Set Less Than Unsigned
+    elif op_string == "SLTU": # Set Less Than Unsigned
         res_o = 1 if a_i < b_i else 0
 
     else:
@@ -712,54 +729,60 @@ def module_alu(src1_i, src2_i, alu_op_i):
     z_o = 1 if final_res_o == 0 else 0
     s_o = (final_res_o >> 31) & 1
 
-    # 5. Logic Analyzer Trace
-    flag_str = f"Z:{z_o} S:{s_o} V:{ovfl_o} C:{carry_o}"
-    print("\n--- Inside ALU-------")
-    print(f"ALU-CORE | A: 0x{a_i:08x} | B: 0x{b_i:08x} | OP: {alu_op_i:<4}")
-    print(f"ALU-OUT  | RES: 0x{final_res_o:08x} | FLAGS: [{flag_str}]\n")
+    # 5. Logic Analyzer Trace (Controlled by DEBUG_MODE flag)
+    if DEBUG_MODE:
+        flag_str = f"Z:{z_o} S:{s_o} V:{ovfl_o} C:{carry_o}"
+        print("\n--- Inside ALU-------")
+        print(f"ALU-CORE | A: 0x{a_i:08x} | B: 0x{b_i:08x} | OP: {op_string:<4} (Int: {alu_op_i})")
+        print(f"ALU-OUT  | RES: 0x{final_res_o:08x} | FLAGS: [{flag_str}]\n")
 
     return final_res_o, z_o, s_o, ovfl_o, carry_o
 
-def module_ctrl(opcode_i, funct3_i, funct7_i):
+"""CTRL"""
+def module_ctrl(opcode_i, funct3_i, funct7_i, DEBUG_MODE=False):
     """
     Audited RV32I Control Unit.
     Logic mapped to 'Chip Design with Rashid' Microarchitecture.
+    Now outputting integer ENUMs for alu_ctrl_o.
     """
     op = opcode_i & 0x7F
 
     # --- Hardware Defaults (Reset State) ---
     is_cond_branch_o, is_jal_o, is_jalr_o = 0, 0, 0
     imm_src_o, alu_src1_ctrl_o, alu_src2_ctrl_o = 0, 1, 0
-    alu_ctrl_o = "ADD"
+    
+    # 0 maps to "ADD"
+    alu_ctrl_o = 0 
+    
     datamem_re_o, datamem_we_o, dataMem2Reg_o, regfile_we_o = 0, 0, 0, 0
 
     # --- Instruction Decoding Logic ---
 
     if op == 51:    # 0x33: R-TYPE (Reg-Reg)
         regfile_we_o = 1
-        if funct3_i == 0 and funct7_i == 32: alu_ctrl_o = "SUB"  # sub
-        elif funct3_i == 0: alu_ctrl_o = "ADD"                  # add
-        elif funct3_i == 1: alu_ctrl_o = "SLL"                  # sll
-        elif funct3_i == 2: alu_ctrl_o = "SLT"                  # slt
-        elif funct3_i == 3: alu_ctrl_o = "SLTU"                 # sltu
-        elif funct3_i == 4: alu_ctrl_o = "XOR"                  # xor
-        elif funct3_i == 5 and funct7_i == 32: alu_ctrl_o = "SRA" # sra
-        elif funct3_i == 5: alu_ctrl_o = "SRL"                  # srl
-        elif funct3_i == 6: alu_ctrl_o = "OR"                   # or
-        elif funct3_i == 7: alu_ctrl_o = "AND"                  # and
+        if funct3_i == 0 and funct7_i == 32: alu_ctrl_o = 1  # sub
+        elif funct3_i == 0: alu_ctrl_o = 0                   # add
+        elif funct3_i == 1: alu_ctrl_o = 2                   # sll
+        elif funct3_i == 2: alu_ctrl_o = 3                   # slt
+        elif funct3_i == 3: alu_ctrl_o = 4                   # sltu
+        elif funct3_i == 4: alu_ctrl_o = 5                   # xor
+        elif funct3_i == 5 and funct7_i == 32: alu_ctrl_o = 7 # sra
+        elif funct3_i == 5: alu_ctrl_o = 6                   # srl
+        elif funct3_i == 6: alu_ctrl_o = 8                   # or
+        elif funct3_i == 7: alu_ctrl_o = 9                   # and
 
     elif op == 19:  # 0x13: I-TYPE (Reg-Imm)
         regfile_we_o, alu_src2_ctrl_o = 1, 1
-        if funct3_i == 0: alu_ctrl_o = "ADD"                    # addi
-        elif funct3_i == 2: alu_ctrl_o = "SLT"                  # slti
-        elif funct3_i == 3: alu_ctrl_o = "SLTU"                 # sltiu
-        elif funct3_i == 4: alu_ctrl_o = "XOR"                  # xori
-        elif funct3_i == 6: alu_ctrl_o = "OR"                   # ori
-        elif funct3_i == 7: alu_ctrl_o = "AND"                  # andi
-        elif funct3_i == 1: alu_ctrl_o = "SLL"                  # slli
+        if funct3_i == 0: alu_ctrl_o = 0                     # addi
+        elif funct3_i == 2: alu_ctrl_o = 3                   # slti
+        elif funct3_i == 3: alu_ctrl_o = 4                   # sltiu
+        elif funct3_i == 4: alu_ctrl_o = 5                   # xori
+        elif funct3_i == 6: alu_ctrl_o = 8                   # ori
+        elif funct3_i == 7: alu_ctrl_o = 9                   # andi
+        elif funct3_i == 1: alu_ctrl_o = 2                   # slli
         elif funct3_i == 5:
-            if funct7_i == 32: alu_ctrl_o = "SRA"               # srai
-            else: alu_ctrl_o = "SRL"                            # srli
+            if funct7_i == 32: alu_ctrl_o = 7                # srai
+            else: alu_ctrl_o = 6                             # srli
 
     elif op == 3:   # 0x03: LOAD
         regfile_we_o, alu_src2_ctrl_o, datamem_re_o, dataMem2Reg_o = 1, 1, 1, 1
@@ -768,7 +791,7 @@ def module_ctrl(opcode_i, funct3_i, funct7_i):
         imm_src_o, alu_src2_ctrl_o, datamem_we_o = 1, 1, 1
 
     elif op == 99:  # 0x63: BRANCH
-        is_cond_branch_o, imm_src_o, alu_ctrl_o = 1, 2, "SUB"
+        is_cond_branch_o, imm_src_o, alu_ctrl_o = 1, 2, 1    # 1 maps to "SUB"
 
     elif op == 55:  # 0x37: LUI (Load Upper Imm)
         # src1=2 (Zero), src2=1 (Imm), imm_src=3 (U-type)
@@ -779,24 +802,32 @@ def module_ctrl(opcode_i, funct3_i, funct7_i):
         regfile_we_o, imm_src_o, alu_src1_ctrl_o, alu_src2_ctrl_o = 1, 3, 0, 1
 
     elif op == 103: # 0x67: JALR
-        is_jalr_o, regfile_we_o, alu_src1_ctrl_o, alu_src2_ctrl_o, alu_ctrl_o, dataMem2Reg_o = 1, 1, 1, 1, "ADD", 2
+        # 0 maps to "ADD"
+        is_jalr_o, regfile_we_o, alu_src1_ctrl_o, alu_src2_ctrl_o, alu_ctrl_o, dataMem2Reg_o = 1, 1, 1, 1, 0, 2
 
     elif opcode_i == 111: # 0x6F: JAL
         is_jal_o, regfile_we_o, imm_src_o, dataMem2Reg_o, datamem_re_o, datamem_we_o = 1, 1, 4, 2, 0, 0
 
-    # Inside module_ctrl, just before the final 'return signals_o'
-    print(f"\n--- inside the module module_ctrl ---")
-    print(f"INPUTS  | op_i: {opcode_i} | f3_i: {funct3_i} | f7_i: {funct7_i}\n"
-          f"OUTPUTS | Mem: [RE:{datamem_re_o}, WE:{datamem_we_o}]\n"
-          f"        | BCU [IS-COND-BRANCH:{is_cond_branch_o}, IS_JAL:{is_jal_o}, IS_JALR:{is_jalr_o}]\n"
-          f"        | Data: [ImmSrc:{imm_src_o}, S1:{alu_src1_ctrl_o}, S2:{alu_src2_ctrl_o}, ALU:{alu_ctrl_o}, D2R:{dataMem2Reg_o}, RFWE:{regfile_we_o}]")
+    # --- Print Trace ---
+    if DEBUG_MODE:
+        # Reverse mapping just for a human-readable printout
+        REVERSE_ALU_OPS = {
+            0: "ADD", 1: "SUB", 2: "SLL", 3: "SLT", 
+            4: "SLTU", 5: "XOR", 6: "SRL", 7: "SRA", 
+            8: "OR", 9: "AND"
+        }
+        alu_str = REVERSE_ALU_OPS.get(alu_ctrl_o, "UNKNOWN")
+
+        print(f"\n--- inside the module module_ctrl ---")
+        print(f"INPUTS  | op_i: {opcode_i} | f3_i: {funct3_i} | f7_i: {funct7_i}\n"
+              f"OUTPUTS | Mem: [RE:{datamem_re_o}, WE:{datamem_we_o}]\n"
+              f"        | BCU [IS-COND-BRANCH:{is_cond_branch_o}, IS_JAL:{is_jal_o}, IS_JALR:{is_jalr_o}]\n"
+              f"        | Data: [ImmSrc:{imm_src_o}, S1:{alu_src1_ctrl_o}, S2:{alu_src2_ctrl_o}, ALU:{alu_str} ({alu_ctrl_o}), D2R:{dataMem2Reg_o}, RFWE:{regfile_we_o}]")
 
     return (is_cond_branch_o, is_jal_o, is_jalr_o, imm_src_o,
             alu_src1_ctrl_o, alu_src2_ctrl_o, alu_ctrl_o,
             datamem_re_o, datamem_we_o, dataMem2Reg_o, regfile_we_o)
-
-
-
+""" RF """
 def module_register_file(rs1_addr_i, rs2_addr_i, rd_addr_i, rd_data_i, rf_we_i, reg_file_obj):
     """
     Register File (Mapped to Physical RegFile Object)
