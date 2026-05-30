@@ -1,31 +1,39 @@
-// File location: osoc1_sim/common/cpu_pkg.sv
-
 package cpu_sv_package;
 
-    // The strongly-typed Enum for Write-Back Mux selection
+    // --- Write-Back Mux Selection ---
     typedef enum logic [1:0] {
         SEL_ALU = 2'b00,
         SEL_LAU = 2'b01,
         SEL_PC4 = 2'b10
     } wb_sel_e;
 
-    // You will eventually add ALU opcodes, PC states, and 
-    // instruction types to this exact same file!
-
-    // ALU Operand A Mux Enum (2-bit)
+    // --- ALU Operand A Mux Selection ---
     typedef enum logic [1:0] {
         OP_A_PC   = 2'b00,
         OP_A_RS1  = 2'b01,
         OP_A_ZERO = 2'b10
     } sel_alu_a_e;
 
-    // ALU Operand B Mux Enum (1-bit)
+    // --- ALU Operand B Mux Selection ---
     typedef enum logic {
         OP_B_RS2 = 1'b0,
         OP_B_IMM = 1'b1
     } sel_alu_b_e;
 
-endpackage
+    // --- ALU Operations (Aligned with Python Controller) ---
+    typedef enum logic [3:0] {
+        ALU_ADD  = 4'd0,
+        ALU_SUB  = 4'd1,
+        ALU_SLL  = 4'd2,  // Fixed to match Python model
+        ALU_SLT  = 4'd3,  // Fixed to match Python model
+        ALU_SLTU = 4'd4,  // Fixed to match Python model
+        ALU_XOR  = 4'd5,
+        ALU_SRL  = 4'd6,
+        ALU_SRA  = 4'd7,
+        ALU_OR   = 4'd8,
+        ALU_AND  = 4'd9
+    } alu_op_e;
 
+endpackage
 
 
