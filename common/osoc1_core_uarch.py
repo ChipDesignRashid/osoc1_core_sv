@@ -611,36 +611,26 @@ def module_lau(raw_mem_data_i, adrs_1_i, adrs_0_i, funct3_i):
 
     return 0
 
-  # ==========================================
+# ==========================================
 # STORE ALIGNMENT UNIT (SAU)
 # ==========================================
 
 def module_sau(rd2_data_i, adrs_1_i, adrs_0_i, funct3_i):
-    """
-    Positions data for writing and generates the 4-bit byte enable mask.
-    """
     byte_offset = (adrs_1_i << 1) | adrs_0_i
+    
+    # Just shift the raw data, let the byte_mask_o handle the protection
+    aligned_data_o = (rd2_data_i << (byte_offset * 8)) & 0xFFFFFFFF
+    byte_mask_o = 0
 
-    aligned_data_o = 0
-    byte_mask_o = 0 # 4-bit mask (0000 to 1111)
-
-    if funct3_i == 0x0: # SB (Store Byte)
-        # Isolate the bottom 8 bits of the register to enforce minimum width
-        data = rd2_data_i & 0xFF
-        aligned_data_o = (data << (byte_offset * 8)) & 0xFFFFFFFF
+    if funct3_i == 0x0:   # SB
         byte_mask_o = (0x1 << byte_offset) & 0xF
-
-    elif funct3_i == 0x1: # SH (Store Halfword)
-        # Isolate the bottom 16 bits of the register
-        data = rd2_data_i & 0xFFFF
-        aligned_data_o = (data << (byte_offset * 8)) & 0xFFFFFFFF
+    elif funct3_i == 0x1: # SH
         byte_mask_o = (0x3 << byte_offset) & 0xF
-
-    elif funct3_i == 0x2: # SW (Store Word)
-        aligned_data_o = rd2_data_i & 0xFFFFFFFF
-        byte_mask_o = 0xF # 1111 -> Write all 4 bytes
+    elif funct3_i == 0x2: # SW
+        byte_mask_o = 0xF
 
     return aligned_data_o, byte_mask_o
+
 
 """ALU"""
 def module_alu(src1_i, src2_i, alu_op_i, DEBUG_MODE=False):
