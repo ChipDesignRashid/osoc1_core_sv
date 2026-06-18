@@ -1,67 +1,79 @@
 import random
 import cocotb
 from cocotb.triggers import Timer
+
+# Import your updated Python Golden Model
 from osoc1_core_uarch import module_sau 
 
 @cocotb.test()
 async def automated_sau_test(dut):
-    """Verify SAU using max/min boundaries across all alignments."""
-
+    """Verify Data Replication, Strobe Generation, and Safety Gates."""
+    
     MAX_VAL = 0xFFFFFFFF
-    MIN_VAL = 0x00000000
-
-    # Test Matrix: (Description, Data, adrs_1, adrs_0, funct3)
-    # funct3: 0=SB, 1=SH, 2=SW
+    
+    # Test Matrix: (Description, mem_we, rs2_val, adrs_1, adrs_0, f3)
     test_cases = [
-        # --- Absolute Boundaries on Store Byte (SB) ---
-        ("SB Max Val, Offset 0", MAX_VAL, 0, 0, 0),
-        ("SB Max Val, Offset 3", MAX_VAL, 1, 1, 0), # Tests extreme left shift
-        ("SB Min Val, Offset 2", MIN_VAL, 1, 0, 0),
+        # --- Store Byte (sb) across all 4 lanes ---
+        ("SB: Lane 0 (adrs 00)", 1, 0x12345678, 0, 0, 0b000),
+        ("SB: Lane 1 (adrs 01)", 1, 0x12345678, 0, 1, 0b000),
+        ("SB: Lane 2 (adrs 10)", 1, 0x12345678, 1, 0, 0b000),
+        ("SB: Lane 3 (adrs 11)", 1, 0x12345678, 1, 1, 0b000),
 
-        # --- Absolute Boundaries on Store Halfword (SH) ---
-        ("SH Max Val, Offset 0", MAX_VAL, 0, 0, 1),
-        ("SH Max Val, Offset 2", MAX_VAL, 1, 0, 1), # Max shift for SH
-        ("SH Min Val, Offset 2", MIN_VAL, 1, 0, 1),
+        # --- Store Halfword (sh) across both halves ---
+        ("SH: Lower Half (adrs 0X)", 1, 0xDEADBEEF, 0, 0, 0b001),
+        ("SH: Upper Half (adrs 1X)", 1, 0xDEADBEEF, 1, 0, 0b001),
 
-        # --- Absolute Boundaries on Store Word (SW) ---
-        ("SW Max Val", MAX_VAL, 0, 0, 2),
-        ("SW Min Val", MIN_VAL, 0, 0, 2),
+        # --- Store Word (sw) ---
+        ("SW: Full Word", 1, MAX_VAL, 0, 0, 0b010),
+
+        # --- THE SAFETY GATE (mem_we = 0) ---
+        ("Safety Gate: Block SB", 0, MAX_VAL, 0, 0, 0b000),
+        ("Safety Gate: Block SW", 0, MAX_VAL, 0, 0, 0b010),
     ]
 
     # Add Random Fuzzing
-    for _ in range(10):
+    for i in range(15):
         test_cases.append((
-            "Random Fuzz",
-            random.randint(MIN_VAL, MAX_VAL),
-            random.randint(0, 1),
-            random.randint(0, 1),
-            random.randint(0, 2)
+            f"Random Fuzz {i}",
+            random.randint(0, 1),            # Random mem_we (0 or 1)
+            random.randint(0, MAX_VAL),      # Random 32-bit data
+            random.randint(0, 1),            # Random adrs_1
+            random.randint(0, 1),            # Random adrs_0
+            random.choice([0b000, 0b001, 0b010]) # Valid f3 types
         ))
 
-    dut._log.info("Starting SAU Verification...")
-    
-    for desc, data, a1, a0, f3 in test_cases:
-        # Drive pins
-        dut.rd2_data_i.value = data
-        dut.adrs_1_i.value = a1
-        dut.adrs_0_i.value = a0
-        dut.funct3_i.value = f3
+    dut._log.info("Starting SAU Combinational Verification...")
 
+    for desc, mem_we, rs2_val, adrs_1, adrs_0, f3 in test_cases:
+        
+        # =====================================================================
+        # PHASE 1: DRIVE HARDWARE INPUTS
+        # =====================================================================
+        dut.mem_we_i.value  = mem_we
+        dut.rs2_val_i.value = rs2_val
+        dut.adrs_1_i.value  = adrs_1
+        dut.adrs_0_i.value  = adrs_0
+        dut.f3_i.value      = f3
+        
+        # 1 ns propagation delay for combinational logic
         await Timer(1, unit="ns")
 
-        # Get Golden Results
-        exp_aligned, exp_mask = module_sau(data, a1, a0, f3)
+        # Read Hardware Simulator (Clamped to 32-bit boundaries)
+        hw_wdata = int(dut.wdata_o.value) & MAX_VAL
+        hw_strobe = int(dut.strobe_o.value) & 0xF
 
-        # Read Hardware
-        hw_aligned = int(dut.aligned_data_o.value)
-        hw_mask    = int(dut.byte_mask_o.value)
+        # =====================================================================
+        # PHASE 2: GOLDEN MODEL COMPARISON
+        # =====================================================================
+        exp_wdata, exp_strobe = module_sau(mem_we, rs2_val, adrs_1, adrs_0, f3)
 
-        # Mask Python output to 32 bits for clean comparison
-        exp_aligned &= 0xFFFFFFFF
+        # Assertions
+        assert hw_wdata == exp_wdata, \
+            f"FAIL ({desc}) WDATA! Exp: 0x{exp_wdata:08X} | Act: 0x{hw_wdata:08X}"
+            
+        assert hw_strobe == exp_strobe, \
+            f"FAIL ({desc}) STROBE! Exp: {bin(exp_strobe)} | Act: {bin(hw_strobe)}"
 
-        assert hw_aligned == exp_aligned, f"DATA FAIL ({desc})! Exp: 0x{exp_aligned:08X} | Act: 0x{hw_aligned:08X}"
-        assert hw_mask == exp_mask,       f"MASK FAIL ({desc})! Exp: {bin(exp_mask)} | Act: {bin(hw_mask)}"
-        
-        dut._log.info(f"PASS: {desc} | Mask: {bin(hw_mask)} | Data: 0x{hw_aligned:08X}")
+        dut._log.info(f"PASS: {desc} | Strobe: {bin(hw_strobe)} | Data: 0x{hw_wdata:08X}")
 
-    dut._log.info("SUCCESS: All SAU boundaries passed!")
+    dut._log.info("SUCCESS: SAU perfectly replicates data and masks strobes!")

@@ -1,72 +1,72 @@
-// TODO: add datamem_we as input fromcontroller and AND this with byte_mask_o
-//
 module sau (
-    input  logic [31:0] rd2_data_i,
-    input  logic        adrs_1_i,
-    input  logic        adrs_0_i,
-    input  logic [2:0]  funct3_i,
+    input  logic        mem_we_i,   // NEW: Master Write Enable from Control Unit (1-bit)
+    input  logic [31:0] rs2_val_i,  // Raw data to store
+    input  logic        adrs_1_i,   // ALU result bit 1
+    input  logic        adrs_0_i,   // ALU result bit 0
+    input  logic [2:0]  f3_i,       // NEW: funct3 to decode sb/sh/sw
 
-    output logic [31:0] aligned_data_o,
-    output logic [3:0]  byte_mask_o     // This is your 'dm_we'
+    output logic [31:0] wdata_o,    // Replicated data
+    output logic [3:0]  strobe_o    // NEW: 4-bit Write Strobe for the memory
 );
 
-    // Internal wires matching your schematic nodes
-    logic [31:0] node_t;
-    logic [31:0] node_u;
+    logic [3:0] raw_strobe;
 
-    // =========================================================================
-    // 1. DATA PATH: The Cascaded Multiplexers
-    // =========================================================================
-    
-    // First Mux (Controlled by adrs_1_i)
-    // If adrs_1_i == 1, route the 16-bit left-shifted data. Else, route raw data.
-    assign node_t = adrs_1_i ? (rd2_data_i << 16) : rd2_data_i;
-
-    // Second Mux (Controlled by adrs_0_i)
-    // If adrs_0_i == 1, route the 8-bit left-shifted 'T' data. Else, route 'T'.
-    assign node_u = adrs_0_i ? (node_t << 8) : node_t;
-
-    // Final Output Connection
-    assign aligned_data_o = node_u;
-
-
-    // =========================================================================
-    // 2. CONTROL PATH: The 'dm_we' Logic Cloud
-    // =========================================================================
     always_comb begin
-        // Hardware default
-        byte_mask_o = 4'b0000;
+        // Default assignments to prevent inferred latches
+        wdata_o    = rs2_val_i;
+        raw_strobe = 4'b0000;
 
-        case (funct3_i)
-            // if func3 == sb
+        case (f3_i)
+            // -----------------------------------------------------------------
+            // sb (Store Byte) - funct3: 3'b000
+            // -----------------------------------------------------------------
             3'b000: begin 
-                case ({adrs_1_i, adrs_0_i})
-                    2'b00: byte_mask_o = 4'b0001;
-                    2'b01: byte_mask_o = 4'b0010;
-                    2'b10: byte_mask_o = 4'b0100;
-                    2'b11: byte_mask_o = 4'b1000;
-                endcase
+                // Smear the lowest byte across all 4 lanes: { A, A, A, A }
+                wdata_o = {4{rs2_val_i[7:0]}};
+                
+                // Shift a single '1' to the correct byte lane based on the address
+                // Address 00 -> 0001
+                // Address 01 -> 0010
+                // Address 10 -> 0100
+                // Address 11 -> 1000
+                raw_strobe = 4'b0001 << {adrs_1_i, adrs_0_i};
             end
 
-            // if func3 == sh
+            // -----------------------------------------------------------------
+            // sh (Store Halfword) - funct3: 3'b001
+            // -----------------------------------------------------------------
             3'b001: begin 
- 	    	// We must handle unaligned addresses to match Python's bitwise math!
-                case ({adrs_1_i, adrs_0_i}) 
-                    2'b00: byte_mask_o = 4'b0011; // Aligned Offset 0
-                    2'b01: byte_mask_o = 4'b0110; // Unaligned Offset 1
-                    2'b10: byte_mask_o = 4'b1100; // Aligned Offset 2
-                    2'b11: byte_mask_o = 4'b1000; // Unaligned Offset 3 (Top bit chopped off)
-	    	endcase
+                // Smear the lowest halfword across both halves: { AB, AB }
+                wdata_o = {2{rs2_val_i[15:0]}};
+                
+                // If address bit 1 is high, write top half. Else write bottom half.
+                raw_strobe = adrs_1_i ? 4'b1100 : 4'b0011;
             end
 
-            // if func3 == sw
+            // -----------------------------------------------------------------
+            // sw (Store Word) - funct3: 3'b010
+            // -----------------------------------------------------------------
             3'b010: begin 
-                byte_mask_o = 4'b1111;
+                // Pass the full 32-bit word through untouched
+                wdata_o = rs2_val_i;
+                
+                // Enable all 4 bytes
+                raw_strobe = 4'b1111;
             end
-
-            default: byte_mask_o = 4'b0000;
+            
+            // Default catch-all
+            default: begin
+                wdata_o = rs2_val_i;
+                raw_strobe = 4'b0000;
+            end
         endcase
     end
 
-endmodule
+    // =========================================================================
+    // The Hardware Safety Gate
+    // =========================================================================
+    // If the instruction is NOT a store (mem_we_i is 0), force the strobe to 
+    // 4'b0000 to absolutely guarantee we don't accidentally corrupt memory.
+    assign strobe_o = mem_we_i ? raw_strobe : 4'b0000;
 
+endmodule

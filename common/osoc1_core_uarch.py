@@ -614,22 +614,60 @@ def module_lau(raw_mem_data_i, adrs_1_i, adrs_0_i, funct3_i):
 # ==========================================
 # STORE ALIGNMENT UNIT (SAU)
 # ==========================================
-
-def module_sau(rd2_data_i, adrs_1_i, adrs_0_i, funct3_i):
-    byte_offset = (adrs_1_i << 1) | adrs_0_i
+def module_sau(mem_we_i, rs2_val_i, adrs_1_i, adrs_0_i, f3_i):
+    """
+    Python Golden Model for the Store Alignment Unit (SAU).
+    Generates 32-bit replicated data and a 4-bit write strobe.
+    """
+    # Enforce 32-bit maximum hardware boundary
+    rs2_val_i = rs2_val_i & 0xFFFFFFFF
     
-    # Just shift the raw data, let the byte_mask_o handle the protection
-    aligned_data_o = (rd2_data_i << (byte_offset * 8)) & 0xFFFFFFFF
-    byte_mask_o = 0
+    aligned_wdata = rs2_val_i
+    raw_strobe = 0b0000
 
-    if funct3_i == 0x0:   # SB
-        byte_mask_o = (0x1 << byte_offset) & 0xF
-    elif funct3_i == 0x1: # SH
-        byte_mask_o = (0x3 << byte_offset) & 0xF
-    elif funct3_i == 0x2: # SW
-        byte_mask_o = 0xF
+    if f3_i == 0b000: # sb (Store Byte)
+        byte_val = rs2_val_i & 0xFF
+        # Replicate byte 4 times to simulate SV {4{rs2_val_i[7:0]}}
+        aligned_wdata = (byte_val << 24) | (byte_val << 16) | (byte_val << 8) | byte_val
+        
+        # Calculate lane offset (0, 1, 2, or 3) and shift the '1'
+        lane = (adrs_1_i << 1) | adrs_0_i
+        raw_strobe = 0b0001 << lane
 
-    return aligned_data_o, byte_mask_o
+    elif f3_i == 0b001: # sh (Store Halfword)
+        hw_val = rs2_val_i & 0xFFFF
+        # Replicate halfword 2 times to simulate SV {2{rs2_val_i[15:0]}}
+        aligned_wdata = (hw_val << 16) | hw_val
+        
+        # Enable top half (1100) or bottom half (0011)
+        raw_strobe = 0b1100 if adrs_1_i else 0b0011
+
+    elif f3_i == 0b010: # sw (Store Word)
+        aligned_wdata = rs2_val_i
+        raw_strobe = 0b1111
+
+    # =========================================================================
+    # The Hardware Safety Gate
+    # =========================================================================
+    strobe_o = raw_strobe if mem_we_i else 0b0000
+
+    return aligned_wdata, strobe_o
+
+#def module_sau(rd2_data_i, adrs_1_i, adrs_0_i, funct3_i):
+#    byte_offset = (adrs_1_i << 1) | adrs_0_i
+  
+#    # Just shift the raw data, let the byte_mask_o handle the protection
+#    aligned_data_o = (rd2_data_i << (byte_offset * 8)) & 0xFFFFFFFF
+#    byte_mask_o = 0
+
+#    if funct3_i == 0x0:   # SB
+#        byte_mask_o = (0x1 << byte_offset) & 0xF
+#    elif funct3_i == 0x1: # SH
+#        byte_mask_o = (0x3 << byte_offset) & 0xF
+#    elif funct3_i == 0x2: # SW
+#        byte_mask_o = 0xF
+
+#    return aligned_data_o, byte_mask_o
 
 
 """ALU"""
