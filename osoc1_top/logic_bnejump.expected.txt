@@ -1,0 +1,4 @@
+--- Final Register State (ABI Mapping & Signed Check) ---
+x05 (t0    ) : 0x00000000 (           0)
+x06 (t1    ) : 0x0000000f (          15)
+x07 (t2    ) : 0x00000063 (          99)

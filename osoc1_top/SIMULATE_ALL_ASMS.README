@@ -1,0 +1,12 @@
+make TEST_NAME=logic_test
+make TEST_NAME=logic_R
+make TEST_NAME=logic_I_alu.asm
+make TEST_NAME=logic_I_alu
+make TEST_NAME=logic_load
+make TEST_NAME=logic_store
+make TEST_NAME=logic_store
+make TEST_NAME=logic_auipc
+make TEST_NAME=logic_bnejump
+make TEST_NAME=logic_bnejump
+make TEST_NAME=logic_branch
+make TEST_NAME=logic_jump

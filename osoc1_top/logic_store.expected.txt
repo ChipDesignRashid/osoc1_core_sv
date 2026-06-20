@@ -1,0 +1,8 @@
+--- Final Register State (ABI Mapping & Signed Check) ---
+x01 (ra    ) : 0xffffffff (          -1)
+x02 (sp    ) : 0x00000055 (          85)
+x03 (gp    ) : 0x00000777 (        1911)
+x10 (a0    ) : 0x0000012c (         300)
+x20 (s4    ) : 0x077755ff (   125261311)
+
+--- Final Data Memory State (Sparse Dump) ---

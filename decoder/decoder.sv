@@ -23,10 +23,23 @@ module decoder (
     assign rs2_o = instr_i[24:20];
     assign f7_o  = instr_i[31:25];
 
+    // --- Icarus Bug Fix: Pre-slice wires to enforce strict boundaries ---
+    wire        i31     = instr_i[31];
+    wire [11:0] i31_20  = instr_i[31:20];
+    wire [6:0]  i31_25  = instr_i[31:25];
+    wire [4:0]  i11_7   = instr_i[11:7];
+    wire        i7      = instr_i[7];
+    wire [5:0]  i30_25  = instr_i[30:25];
+    wire [3:0]  i11_8   = instr_i[11:8];
+    wire [19:0] i31_12  = instr_i[31:12];
+    wire [7:0]  i19_12  = instr_i[19:12];
+    wire        i20     = instr_i[20];
+    wire [9:0]  i30_21  = instr_i[30:21];
+
     // --- 2. Immediate Generation ---
     always_comb begin
         // Default to zero to prevent synthesis latches
-        imm_o = '0; 
+        imm_o = '0;
 
         case (op_o)
             OPCODE_R_TYPE: begin
@@ -34,23 +47,23 @@ module decoder (
             end
 
             OPCODE_I_TYPE_ALU, OPCODE_I_TYPE_LOAD, OPCODE_I_TYPE_JALR: begin
-                imm_o = { {20{instr_i[31]}}, instr_i[31:20] };
+                imm_o = { {20{i31}}, i31_20 };
             end
 
             OPCODE_S_TYPE: begin
-                imm_o = { {20{instr_i[31]}}, instr_i[31:25], instr_i[11:7] };
+                imm_o = { {20{i31}}, i31_25, i11_7 };
             end
 
             OPCODE_B_TYPE: begin
-                imm_o = { {19{instr_i[31]}}, instr_i[31], instr_i[7], instr_i[30:25], instr_i[11:8], 1'b0 };
+                imm_o = { {19{i31}}, i31, i7, i30_25, i11_8, 1'b0 };
             end
 
             OPCODE_U_TYPE_LUI, OPCODE_U_TYPE_AUIPC: begin
-                imm_o = { instr_i[31:12], 12'b0 };
+                imm_o = { i31_12, 12'b0 };
             end
 
             OPCODE_J_TYPE: begin
-                imm_o = { {11{instr_i[31]}}, instr_i[31], instr_i[19:12], instr_i[20], instr_i[30:21], 1'b0 };
+                imm_o = { {11{i31}}, i31, i19_12, i20, i30_21, 1'b0 };
             end
 
             default: begin
@@ -60,4 +73,3 @@ module decoder (
     end
 
 endmodule
-
